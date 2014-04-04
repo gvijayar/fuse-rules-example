@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ~ Copyright 2012 Red Hat ~ ~ Licensed under the Apache License, Version 2.0 (the "License"); ~ you may not use this file except 
+	in compliance with the License. ~ You may obtain a copy of the License at ~ ~ http://www.apache.org/licenses/LICENSE-2.0 ~ ~ Unless 
+	required by applicable law or agreed to in writing, software ~ distributed under the License is distributed on an "AS IS" BASIS, ~ 
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. ~ See the License for the specific language governing permissions 
+	and ~ limitations under the License. -->
+
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:drools="http://drools.org/schema/drools-spring"
+	xsi:schemaLocation="
+       http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd
+       http://drools.org/schema/drools-spring http://drools.org/schema/drools-spring.xsd">
+
+	<import resource="classpath:META-INF/spring/camel-cxf.xml" />
+
+	<!-- Setup Drools -->
+	<drools:grid-node id="node1" />
+
+	<drools:kbase id="kbase1" node="node1">
+		<drools:configuration>
+			<drools:mbeans enabled="true" />
+		</drools:configuration>
+		<drools:resources>
+			<drools:resource type="DRL" source="classpath:BasicRules.drl" />
+		</drools:resources>
+	</drools:kbase>
+
+	<drools:ksession id="ksession1" type="stateless" name="ksession1" kbase="kbase1" node="node1" />
+
+	<!-- declare the drools bean here to avoid OSGi classpath issues -->
+	<bean id="drools" class="org.drools.camel.component.DroolsComponent" />
+	<bean id="rulesProcessor" class="com.acme.rules.RulesCamelProcessor"/>
+	<bean id="rulesHelper" class="com.acme.rules.DroolsHelperProcessor"/>
+	<bean id="outputHelper" class="com.acme.rules.OrderResponseHelper"/>
+
+	<!-- connect to the local ActiveMQ broker -->
+	<bean id="activemq" class="org.apache.activemq.camel.component.ActiveMQComponent">
+		<property name="brokerURL" value="tcp://localhost:61616" />
+		<property name="userName" value="admin" />
+		<property name="password" value="admin" />
+	</bean>
+
+	<camelContext id="camel-automated-intelligence" xmlns="http://camel.apache.org/schema/spring">
+    <route trace="false" id="RulesServiceRoute">
+        <description>&lt;to uri="drools:node1/ksession1?action=insertBody" id="OrderRules"&gt;
+            &lt;description&gt;valid 'action' values are:
+                    'execute' that takes a 'Command' object (default)
+                    'insertBody' that inserts the Exchange.in.body, and executes rules
+                    'insertMessage' that inserts the Exchange.in (type org.apache.camel.Message), and executes rules
+                    'insertExchange' that inserts the Exchange (type org.apache.camel.Exchange), and executes rules
+                &lt;/description&gt;
+        	&lt;/to&gt;
+			&lt;to uri="rulesProcessor"/&gt;
+		</description>
+        <from uri="cxf:bean:orderEndpoint" id="CXF_Gateway">
+            <description/>
+        </from>
+        <to uri="rulesHelper" id="Drools_Helper"/>
+        <wireTap uri="direct:audit" id="Audit_Wiretap"/>
+        <to uri="drools:node1/ksession1?action=insertBody" id="Parts_Shipping_Rules_Processor"/>
+        <choice id="Rule_Driven_CBR">
+            <when id="Expedited">
+                <xpath>orderBean/shippingPriority = 'Expedited'</xpath>
+                <bean method="expeditedOutput" ref="outputHelper" id="Expedited_Res_Handler"/>
+                <to uri="mock:result" id="Expedited_CXF_Response"/>
+            </when>
+            <when id="Priority">
+                <xpath>orderBean/shippingPriority = 'Priority'</xpath>
+                <bean method="priorityOutput" ref="outputHelper" id="Priority_Res_Handler"/>
+                <to uri="mock:result" id="Priority_CXF_Response"/>
+            </when>
+            <otherwise id="Standard">
+                <bean method="standardOutput" ref="outputHelper" id="Standard_Res_Handler"/>
+                <to uri="mock:result" id="Standard_CXF_Response"/>
+            </otherwise>
+        </choice>
+        <!-- 
+        <to uri="smtp://admin@localhost?to=info@mycompany.com"/>
+         -->
+    </route>
+    <route id="audit-logger">
+        <from uri="direct:audit"/>
+        <log message="The message contents are ${body}"/>
+        <to uri="activemq:incomingOrders"/>
+    </route>
+</camelContext>
+
+</beans>

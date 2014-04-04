@@ -1,0 +1,35 @@
+package com.comp.drools;
+
+import com.redhat.example.drools.webservice.OrderBean;
+
+dialect "mvel" 
+
+rule "Quantity Greater than 100"
+	salience -100
+ 	when
+  		$order : OrderBean( quantity > 200 )
+ 	then
+		$order.setShippingPriority("Expedited");
+	end
+
+rule "Preferred Customer 25 or Less"
+ 	when
+  		$order : OrderBean( loyaltyLevel == "Platinum", quantity <= 25 )
+ 	then
+		$order.setShippingPriority("Priority");
+	end
+
+rule "Preferred Customer greater than 25"
+ 	when
+  		$order : OrderBean( loyaltyLevel == "Platinum", quantity > 25 )
+ 	then
+		$order.setShippingPriority("Expedited");
+	end
+
+rule "Honda Parts Promotion"
+	salience -200
+ 	when
+  		$order : OrderBean(model == "Honda" )
+ 	then
+		$order.setShippingPriority("Expedited");
+	end
